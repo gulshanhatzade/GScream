@@ -5,7 +5,8 @@ from tqdm import tqdm
 
 gpuid = '0'
 task_name = f"gscream"
-refs_root = './refs'
+refs_root = "/kaggle/input/spinnerf-dataset-processed/refs"
+
 
 voxel_size=0.005
 update_init_factor=16
@@ -20,13 +21,14 @@ for nn in ["1", "2", "3", "4", "7", "9", "10", "12", "book", "trash"]:
     print(ref_depth_path)
     assert os.path.exists(ref_depth_path), ref_depth_path
 
-    image_root = f"images"  # by default
+    image_root = "/kaggle/input/spinnerf-dataset-processed/images"
 
-    cmd = f"CUDA_VISIBLE_DEVICES={gpuid} CUDA_LAUNCH_BLOCKING=1 python -u train.py \
-        -s ./data/spinnerf_dataset_processed/{nn} \
+
+    cmd = f"python -u train.py \
+        -s /kaggle/input/spinnerf-dataset-processed/spinnerf_dataset_processed/{nn} \
         --eval \
         --lod 0 \
-        --gpu -1 \
+        --gpu 0 \
         --voxel_size {voxel_size} \
         --update_init_factor {update_init_factor} \
         --iterations 30_000 \
