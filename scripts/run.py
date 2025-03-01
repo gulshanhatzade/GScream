@@ -34,7 +34,7 @@ for nn in ["1", "2", "3", "4", "7", "9", "10", "12", "book", "trash"]:
         -m outputs/spinnerf_dataset/{nn}/{task_name}/ \
         --is_spin \
         --images {image_root} \
-        --specified_ply_path ./data/spinnerf_dataset_processed/{nn}/sparse/0/points3D.ply \
+        --specified_ply_path /kaggle/input/spinnerf-dataset-processed/spinnerf_dataset_processed/{nn}/sparse/0/points3D.ply
         --ref_image_path {ref_image_path} \
         --ref_depth_path {ref_depth_path} \
         --load_mask \
