@@ -20,7 +20,7 @@ for nn in ["1", "2", "3", "4", "7", "9", "10", "12", "book", "trash"]:
     print(ref_depth_path)
     assert os.path.exists(ref_depth_path), ref_depth_path
 
-    image_root = "/kaggle/input/spinnerf-dataset-processed/images"
+    image_root = "/kaggle/input/spinnerf-dataset-processed/spinnerf_dataset_processed/images"
 
 
     cmd = f"python -u train.py \
