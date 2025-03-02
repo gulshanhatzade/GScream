@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 gpuid = '0'
 task_name = f"gscream"
-refs_root = './kaggle/working/GScream/refs'
+refs_root = './refs'
 
 voxel_size=0.005
 update_init_factor=16
