@@ -29,7 +29,7 @@ for nn in ["1", "2", "3", "4", "7", "9", "10", "12", "book", "trash"]:
         --gpu 0 \
         --voxel_size {voxel_size} \
         --update_init_factor {update_init_factor} \
-        --iterations 30_000 \
+        --iterations 10_000 \
         --port 10001 \
         -m outputs/spinnerf_dataset/{nn}/{task_name}/ \
         --is_spin \
