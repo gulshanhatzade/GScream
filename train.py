@@ -230,7 +230,7 @@ def reduction_image_based(image_loss, M):
 
 
 def gradient_loss(prediction, target, mask, reduction=reduction_image_based):
-10
+    
     M = torch.sum(mask, (1, 2))
 
     diff = prediction - target
