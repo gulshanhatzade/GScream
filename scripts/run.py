@@ -30,7 +30,7 @@ for nn in ["1", "2", "3"]:
         --gpu 0 \
         --voxel_size {voxel_size} \
         --update_init_factor {update_init_factor} \
-        --iterations 10_000 \
+        --iterations 100 \
         --port 10001 \
         -m outputs/spinnerf_dataset/{nn}/{task_name}/ \
         --is_spin \
