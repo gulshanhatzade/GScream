@@ -174,12 +174,12 @@ def sample_patch_in_mask_region(gt_mask, patch_size, small_ratio, max_h, max_w):
     small_width, small_height = small_ratio * ori_width, small_ratio * ori_height
 
     # calculate bbox's max width & height
-    max_small_width = new_width - small_width 
-    max_small_height = new_height - small_height 
+    max_small_width = new_width - small_width
+    max_small_height = new_height - small_height
 
     # generate random offset
-    offset_x = random.uniform(0, max_small_width) 
-    offset_y = random.uniform(0, max_small_height) 
+    offset_x = random.uniform(0, max_small_width)
+    offset_y = random.uniform(0, max_small_height)
 
     # calculate bbox's new x_min, y_min, x_max, y_max
     new_x_min = max(0, int(new_x_min + offset_x))
@@ -329,6 +329,29 @@ def saveRuntimeCode(dst: str) -> None:
     
     print('Backup Finished!')
 
+
+def prepare_output_and_logger(args):    
+    if not args.model_path:
+        if os.getenv('OAR_JOB_ID'):
+            unique_str=os.getenv('OAR_JOB_ID')
+        else:
+            unique_str = str(uuid.uuid4())
+        args.model_path = os.path.join("./output/", unique_str[0:10])
+        
+    # Set up output folder
+    print("Output folder: {}".format(args.model_path))
+    os.makedirs(args.model_path, exist_ok = True)
+    with open(os.path.join(args.model_path, "cfg_args"), 'w') as cfg_log_f:
+        cfg_log_f.write(str(Namespace(**vars(args))))
+
+    # Create Tensorboard writer only if explicitly requested via environment variable
+    tb_writer = None
+    save_tensorboard = os.environ.get('SAVE_TENSORBOARD', 'False').lower() == 'true'
+    if TENSORBOARD_FOUND and save_tensorboard:
+        tb_writer = SummaryWriter(args.model_path)
+    else:
+        print("Tensorboard disabled or not available: not logging progress")
+    return tb_writer
 
 def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, wandb=None, logger=None, ply_path=None):
     first_iter = 0
@@ -619,28 +642,6 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                 logger.info("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
-def prepare_output_and_logger(args):    
-    if not args.model_path:
-        if os.getenv('OAR_JOB_ID'):
-            unique_str=os.getenv('OAR_JOB_ID')
-        else:
-            unique_str = str(uuid.uuid4())
-        args.model_path = os.path.join("./output/", unique_str[0:10])
-        
-    # Set up output folder
-    print("Output folder: {}".format(args.model_path))
-    os.makedirs(args.model_path, exist_ok = True)
-    with open(os.path.join(args.model_path, "cfg_args"), 'w') as cfg_log_f:
-        cfg_log_f.write(str(Namespace(**vars(args))))
-
-    # Create Tensorboard writer
-    tb_writer = None
-    if TENSORBOARD_FOUND:
-        tb_writer = SummaryWriter(args.model_path)
-    else:
-        print("Tensorboard not available: not logging progress")
-    return tb_writer
-
 def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, wandb=None, logger=None):
     if tb_writer:
         tb_writer.add_scalar(f'{dataset_name}/train_loss_patches/l1_loss', Ll1.item(), iteration)
@@ -708,6 +709,14 @@ def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elap
         scene.gaussians.train()
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background, source_path=None):
+    # Only save necessary outputs (final model iteration, logs, and minimal test visuals)
+    save_all_outputs = os.environ.get('SAVE_ALL_OUTPUTS', 'False').lower() == 'true'
+    save_final_only = iteration == max(views[0].iteration_list) if hasattr(views[0], 'iteration_list') and views[0].iteration_list else True
+    
+    if not save_all_outputs and not save_final_only and name != 'test':
+        # Skip intermediate renders for non-test sets if not explicitly requested
+        return
+        
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     if name !='spiral':
         error_path = os.path.join(model_path, name, "ours_{}".format(iteration), "errors")
@@ -717,14 +726,16 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth_renders")
     uncertainty_path = os.path.join(model_path, name, "ours_{}".format(iteration), "uncertainty_renders")
 
-    makedirs(render_path, exist_ok=True)
-    if name !='spiral':
-        makedirs(error_path, exist_ok=True)
-        makedirs(gts_path, exist_ok=True)
-    else:
-        makedirs(rgbd_path, exist_ok=True)
-    makedirs(depth_path, exist_ok=True)
-    makedirs(uncertainty_path, exist_ok=True)
+    # Only create directories if we're saving outputs
+    if save_all_outputs or save_final_only or name == 'test':
+        makedirs(render_path, exist_ok=True)
+        if name !='spiral':
+            makedirs(error_path, exist_ok=True)
+            makedirs(gts_path, exist_ok=True)
+        else:
+            makedirs(rgbd_path, exist_ok=True)
+        makedirs(depth_path, exist_ok=True)
+        makedirs(uncertainty_path, exist_ok=True)
 
     if name == 'spiral':
         RGBD = []
@@ -751,7 +762,11 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     visible_count_list = []
     name_list = []
     per_view_dict = {}
-    for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
+    
+    # If we're not saving any outputs, limit to processing only a few views for statistics
+    max_views = len(views) if (save_all_outputs or save_final_only or name == 'test') else min(5, len(views))
+    
+    for idx, view in enumerate(tqdm(views[:max_views], desc="Rendering progress")):
         
         torch.cuda.synchronize();t_start = time.time()
         
@@ -770,72 +785,33 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         # uncertainty
         uncertainty = torch.clamp(render_pkg["uncertainty"], 0.0, 1.0)
         
-        # add depth rendering
-
-        if name != 'spiral':
-            render_depth = render_pkg["render_depth"]
-            depth_ori = render_depth.clone()
-
-            # gt_depth = view.depth
-            gt_depth = view.midas_depth
-            gt_mask = view.original_mask
-            valid_mask = 1 - gt_mask
-            scale, shift = compute_scale_and_shift(render_depth, gt_depth, valid_mask)
-            scale = torch.abs(scale)
-            depth = render_depth * scale + shift
-
-            depth_concat = torch.cat((depth, gt_depth), dim=0).unsqueeze(1)
-            tensor = torchvision.utils.make_grid(depth_concat, padding=0, normalize=False, scale_each=False).cpu().detach().numpy()
-            plt.imsave(os.path.join(depth_path, '{0:05d}'.format(idx) + "_depth.png"), np.transpose(tensor, (1,2,0))[:,:,0], cmap="viridis")
-            # gts
-            gt = view.original_image[0:3, :, :]
-            
-            # error maps
-            errormap = (rendering - gt).abs()
-
-            name_list.append('{0:05d}'.format(idx) + ".png")
-            torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
-            torchvision.utils.save_image(uncertainty, os.path.join(uncertainty_path, '{0:05d}'.format(idx) + ".png"))
-            torchvision.utils.save_image(errormap, os.path.join(error_path, '{0:05d}'.format(idx) + ".png"))
-            torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
-            per_view_dict['{0:05d}'.format(idx) + ".png"] = visible_count.item()
-        
-        else:
-            depth = render_pkg["render_depth"]
-            depth_ori = depth.clone()
-
-            depth = (depth - depth.min()) / (depth.max() - depth.min())
-            depth = (255 * depth.cpu().numpy()).astype(np.uint8)[0]
-            depth = cv2.applyColorMap(depth, cv2.COLORMAP_INFERNO)[:,:,[2,1,0]]
-            depth = torch.FloatTensor(depth).permute([2,0,1]) / 255.
-
-            rendered = torch.flip(rendering.unsqueeze(0), dims=[3])[0]
-            uncertainty = torch.flip(uncertainty.unsqueeze(0), dims=[3])[0] # 1 h w
-            uncertainty = uncertainty.expand([3, -1, -1])
-            depth = torch.flip(depth.unsqueeze(0), dims=[3])[0]
-
-            # add normal
-            c2w = view.C2W[:3,:4]
-            c2w = torch.from_numpy(c2w.astype(np.float32)).cuda()
-            depth_map_3d = depth2pcd_fromplane(depth2d=depth_ori, c2w=c2w, K=K, h=h, w=w)
-            normal = least_square_normal_regress_fast01(depth_map_3d, global_eye, global_b)
-            normal = normal.reshape(3,h,w).permute([1,2,0])
-            normal = (torch.nn.functional.normalize(normal, p=2, dim=-1)).permute([2,0,1]) # 3, h, w
-            normal = (normal + 1) / 2
-            normal = torch.flip(normal.unsqueeze(0), dims=[3])[0]
-
-            rgbd = torch.concat([rendered.cpu(), depth, normal.cpu(), uncertainty.cpu()], 2)
-            torchvision.utils.save_image(rendered, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
-            torchvision.utils.save_image(uncertainty, os.path.join(uncertainty_path, '{0:05d}'.format(idx) + ".png"))
+        # Only save outputs if needed
+        if save_all_outputs or save_final_only or name == 'test':
             if name != 'spiral':
-                torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
-            else:
-                torchvision.utils.save_image(rgbd, os.path.join(rgbd_path, '{0:05d}'.format(idx) + ".png"))
-            torchvision.utils.save_image(depth, os.path.join(depth_path, '{0:05d}'.format(idx) + ".png"))
-        
-        if name == 'train':
-            np.save(os.path.join(depth_path, '{0:05d}'.format(idx) + ".npy"), depth_ori.cpu().numpy())
+                render_depth = render_pkg["render_depth"]
+                depth_ori = render_depth.clone()
 
+                # gt_depth = view.depth
+                gt_depth = view.midas_depth
+                gt_mask = view.original_mask
+                valid_mask = 1 - gt_mask
+                scale, shift = compute_scale_and_shift(render_depth, gt_depth, valid_mask)
+                scale = torch.abs(scale)
+                depth = render_depth * scale + shift
+
+                depth_concat = torch.cat((depth, gt_depth), dim=0).unsqueeze(1)
+                tensor = torchvision.utils.make_grid(depth_concat, padding=0, normalize=False, scale_each=False).cpu().detach().numpy()
+                plt.imsave(os.path.join(depth_path, '{0:05d}'.format(idx) + "_depth.png"), np.transpose(tensor, (1,2,0))[:,:,0], cmap="viridis")
+                # gts
+                gt = view.original_image[0:3, :, :]
+                
+                # error maps
+                errormap = (rendering - gt).abs()
+
+                name_list.append('{0:05d}'.format(idx) + ".png")
+                torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
+                torchvision.utils.save_image(uncertainty, os.path.join(uncertainty_path, '{0:05d}'.format(idx) + ".png"))
+                torchvision.utils.save_image(errormap, os.path.join(error_path, '{0:05d}'.format(idx) + ".png"))
 
     if name != 'spiral':
         with open(os.path.join(model_path, name, "ours_{}".format(iteration), "per_view_count.json"), 'w') as fp:
@@ -848,6 +824,15 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     return t_list, visible_count_list
 
 def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train=False, skip_test=False, wandb=None, tb_writer=None, dataset_name=None, logger=None):
+    # Add an environment variable check to skip or minimize renders for intermediate iterations
+    minimal_renders = os.environ.get('MINIMAL_RENDERS', 'True').lower() == 'true'
+    is_final_iteration = iteration == dataset.iterations
+    
+    if minimal_renders and not is_final_iteration:
+        # Skip intermediate renders unless it's the final iteration
+        logger.info(f"Skipping intermediate renders at iteration {iteration}")
+        return
+
     with torch.no_grad():
         gaussians = GaussianModel(dataset.feat_dim, dataset.n_offsets, dataset.voxel_size, dataset.update_depth, dataset.update_init_factor, dataset.update_hierachy_factor, dataset.use_feat_bank)
         dataset.pretrained_model_path = ""
