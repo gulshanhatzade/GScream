@@ -57,7 +57,6 @@ class Scene:
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval, ply_path=ply_path)
         else:
-            print(f"Dataset: {dataset}, Gaussians: {gaussians}, PLY Path: {ply_path}")
             assert False, "Could not recognize scene type!"
 
         if not self.loaded_iter:
