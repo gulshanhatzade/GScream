@@ -12,7 +12,7 @@ update_init_factor=16
 os.system("ulimit -n 4096")
 
 #for nn in ["1", "2", "3", "4", "7", "9", "10", "12", "book", "trash"]:
-for nn in ["7", "10", "12"]:
+for nn in ["7", "10", "2", "3"]:
     ref_image_path = os.path.join(refs_root, [i for i in sorted(os.listdir(refs_root)) if i.startswith(nn+'_out') and i.endswith('png')][0])
     print(ref_image_path)
     assert os.path.exists(ref_image_path), ref_image_path
